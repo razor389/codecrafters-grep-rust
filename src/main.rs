@@ -5,7 +5,8 @@ use std::process;
 #[derive(Debug, Clone)]
 enum RE {
     Char(char),           // A literal character
-    Star(Box<RE>),        // A character or regex type followed by '*'
+    Question(Box<RE>),        // A character or regex type followed by '?'
+    Plus(Box<RE>),        // A character or regex type followed by '+'
     Dot,                  // The '.' metacharacter
     Start,                // The '^' metacharacter
     End,                  // The '$' metacharacter
@@ -53,11 +54,18 @@ fn parse_pattern(pattern: &str) -> Vec<RE> {
                     i = end_idx;
                 }
             }
-            '*' => {
+            '?' => {
                 if let Some(last) = result.pop() {
-                    result.push(RE::Star(Box::new(last)));
+                    result.push(RE::Question(Box::new(last)));
                 } else {
-                    panic!("Invalid pattern: '*' cannot be the first character");
+                    panic!("Invalid pattern: '?' cannot be the first character");
+                }
+            }
+            '+' => {
+                if let Some(last) = result.pop() {
+                    result.push(RE::Plus(Box::new(last)));
+                } else {
+                    panic!("Invalid pattern: '+' cannot be the first character");
                 }
             }
             ch => result.push(RE::Char(ch)),
@@ -133,7 +141,8 @@ fn match_here(pattern: &[RE], text: &str) -> bool {
                 false
             }
         }
-        RE::Star(boxed_re) => match_star(&**boxed_re, &pattern[1..], text),
+        RE::Question(boxed_re) => match_question(&**boxed_re, &pattern[1..], text),
+        RE::Plus(boxed_re) => match_plus(&**boxed_re, &pattern[1..], text),
         RE::CharClass(class) => {
             if !text.is_empty() && class.contains(&text.chars().next().unwrap()) {
                 match_here(&pattern[1..], &text[1..])
@@ -166,8 +175,30 @@ fn match_here(pattern: &[RE], text: &str) -> bool {
     }
 }
 
-fn match_star(re: &RE, pattern: &[RE], text: &str) -> bool {
+fn match_question(re: &RE, pattern: &[RE], text: &str) -> bool {
     let mut text_slice = text;
+    loop {
+        if match_here(pattern, text_slice) {
+            return true;
+        }
+        if text_slice.is_empty() || !matches_char(re, text_slice.chars().next().unwrap()) {
+            break;
+        }
+        text_slice = &text_slice[1..];
+    }
+    false
+}
+
+fn match_plus(re: &RE, pattern: &[RE], text: &str) -> bool {
+    let mut text_slice = text;
+    // First, we must match at least one occurrence of the character
+    if !text_slice.is_empty() && matches_char(re, text_slice.chars().next().unwrap()) {
+        text_slice = &text_slice[1..];
+    } else {
+        return false;
+    }
+
+    // Now, match zero or more occurrences (like a '?')
     loop {
         if match_here(pattern, text_slice) {
             return true;
