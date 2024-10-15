@@ -14,6 +14,8 @@ enum RE {
     NegCharClass(Vec<char>), // A negated character class, e.g., [^a-z]
     Digit,                // Shorthand for \d (any digit)
     Word,                 // Shorthand for \w (alphanumeric character)
+    Alternation(Box<RE>, Box<RE>), // Alternation between two patterns, e.g., (cat|dog)
+    Group(Vec<RE>),       // A grouped sub-pattern, e.g., (cat)
 }
 
 
@@ -41,18 +43,20 @@ fn parse_pattern(pattern: &str) -> Vec<RE> {
                 }
             }
             '[' => {
-                // Parse character class
                 if i + 1 < chars.len() && chars[i + 1] == '^' {
-                    // Negated character class
                     let (class, end_idx) = parse_char_class(&chars, i + 2);
                     result.push(RE::NegCharClass(class));
                     i = end_idx;
                 } else {
-                    // Regular character class
                     let (class, end_idx) = parse_char_class(&chars, i + 1);
                     result.push(RE::CharClass(class));
                     i = end_idx;
                 }
+            }
+            '(' => {
+                let (group, end_idx) = parse_alternation(&chars, i + 1);
+                result.push(group);
+                i = end_idx;
             }
             '?' => {
                 if let Some(last) = result.pop() {
@@ -75,6 +79,90 @@ fn parse_pattern(pattern: &str) -> Vec<RE> {
 
     result
 }
+
+fn parse_sequence(chars: &[char], i: &mut usize) -> Vec<RE> {
+    let mut result = Vec::new();
+
+    while *i < chars.len() {
+        match chars[*i] {
+            '|' | ')' => break, // Stop when encountering alternation or end of group
+            '^' => result.push(RE::Start),
+            '$' => result.push(RE::End),
+            '.' => result.push(RE::Dot),
+            '\\' => {
+                if *i + 1 < chars.len() {
+                    match chars[*i + 1] {
+                        'd' => result.push(RE::Digit),
+                        'w' => result.push(RE::Word),
+                        '\\' => result.push(RE::Char('\\')),
+                        _ => panic!("Unsupported escape sequence: \\{}", chars[*i + 1]),
+                    }
+                    *i += 1;
+                } else {
+                    panic!("Pattern ends with an incomplete escape sequence");
+                }
+            }
+            '[' => {
+                if *i + 1 < chars.len() && chars[*i + 1] == '^' {
+                    let (class, end_idx) = parse_char_class(chars, *i + 2);
+                    result.push(RE::NegCharClass(class));
+                    *i = end_idx;
+                } else {
+                    let (class, end_idx) = parse_char_class(chars, *i + 1);
+                    result.push(RE::CharClass(class));
+                    *i = end_idx;
+                }
+            }
+            '(' => {
+                *i += 1; // Move past '('
+                let (group, end_idx) = parse_alternation(chars, *i);
+                result.push(group);
+                *i = end_idx;
+            }
+            '?' => {
+                if let Some(last) = result.pop() {
+                    result.push(RE::Question(Box::new(last)));
+                } else {
+                    panic!("Invalid pattern: '?' cannot be the first character");
+                }
+            }
+            '+' => {
+                if let Some(last) = result.pop() {
+                    result.push(RE::Plus(Box::new(last)));
+                } else {
+                    panic!("Invalid pattern: '+' cannot be the first character");
+                }
+            }
+            ch => result.push(RE::Char(ch)),
+        }
+        *i += 1;
+    }
+
+    result
+}
+
+
+fn parse_alternation(chars: &[char], start: usize) -> (RE, usize) {
+    let mut i = start;
+    let left_side = parse_sequence(chars, &mut i);
+    if i < chars.len() && chars[i] == '|' {
+        i += 1; // Move past '|'
+        let right_side = parse_sequence(chars, &mut i);
+        if i < chars.len() && chars[i] == ')' {
+            return (
+                RE::Alternation(Box::new(RE::Group(left_side)), Box::new(RE::Group(right_side))),
+                i,
+            );
+        } else {
+            panic!("Unmatched parenthesis or incomplete alternation");
+        }
+    } else if i < chars.len() && chars[i] == ')' {
+        return (RE::Group(left_side), i);
+    } else {
+        panic!("Unmatched parenthesis or invalid alternation syntax");
+    }
+}
+
 
 fn parse_char_class(chars: &[char], start: usize) -> (Vec<char>, usize) {
     let mut class = Vec::new();
@@ -171,6 +259,10 @@ fn match_here(pattern: &[RE], text: &str) -> bool {
                 false
             }
         }
+        RE::Alternation(left, right) => {
+            match_pattern(&[left.as_ref().clone()], text) || match_pattern(&[right.as_ref().clone()], text)
+        }
+        RE::Group(group_pattern) => match_pattern(group_pattern, text),
         _ => false,
     }
 }
