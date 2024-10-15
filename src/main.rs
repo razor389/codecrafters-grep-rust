@@ -18,7 +18,6 @@ enum RE {
     Group(Vec<RE>),       // A grouped sub-pattern, e.g., (cat)
 }
 
-
 fn parse_pattern(pattern: &str) -> Vec<RE> {
     let mut result = Vec::new();
     let chars: Vec<char> = pattern.chars().collect();
@@ -141,7 +140,6 @@ fn parse_sequence(chars: &[char], i: &mut usize) -> Vec<RE> {
     result
 }
 
-
 fn parse_alternation(chars: &[char], start: usize) -> (RE, usize) {
     let mut i = start;
     let left_side = parse_sequence(chars, &mut i);
@@ -162,7 +160,6 @@ fn parse_alternation(chars: &[char], start: usize) -> (RE, usize) {
         panic!("Unmatched parenthesis or invalid alternation syntax");
     }
 }
-
 
 fn parse_char_class(chars: &[char], start: usize) -> (Vec<char>, usize) {
     let mut class = Vec::new();
