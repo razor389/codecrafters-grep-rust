@@ -2,10 +2,18 @@ use std::env;
 use std::io;
 use std::process;
 
+fn contains_digit(s: &str) -> bool {
+    s.chars().any(|c| c.is_digit(10))  // Base 10 digits
+}
+
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
     if pattern.chars().count() == 1 {
         return input_line.contains(pattern);
-    } else {
+    }
+    else if pattern == "\\d"{
+        return contains_digit(input_line);
+    }
+    else {
         panic!("Unhandled pattern: {}", pattern)
     }
 }
