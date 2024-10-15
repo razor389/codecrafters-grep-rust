@@ -10,6 +10,10 @@ fn cointains_alphanumeric(s: &str) -> bool{
     s.chars().any(|c| c.is_alphanumeric())
 }
 
+fn contains_specific_chars(s: &str, p: &str) -> bool{
+    s.chars().any(|c| p.contains(c))
+}
+
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
     if pattern.chars().count() == 1 {
         return input_line.contains(pattern);
@@ -19,6 +23,9 @@ fn match_pattern(input_line: &str, pattern: &str) -> bool {
     }
     else if pattern == "\\w"{
         return cointains_alphanumeric(input_line);
+    }
+    else if pattern.starts_with('[') && pattern.ends_with(']') && pattern.len() >2{
+        return contains_specific_chars(input_line, &pattern[1..pattern.len()-1]);
     }
     else {
         panic!("Unhandled pattern: {}", pattern)
