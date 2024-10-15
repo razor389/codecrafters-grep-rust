@@ -1,61 +1,213 @@
 use core::panic;
 use std::env;
-use std::io;
 use std::process;
 
-fn contains_digit(s: &str) -> bool {
-    s.chars().any(|c| c.is_digit(10))  // Base 10 digits
+#[derive(Debug, Clone)]
+enum RE {
+    Char(char),           // A literal character
+    Star(Box<RE>),        // A character or regex type followed by '*'
+    Dot,                  // The '.' metacharacter
+    Start,                // The '^' metacharacter
+    End,                  // The '$' metacharacter
+    CharClass(Vec<char>), // A character class, e.g., [a-z]
+    NegCharClass(Vec<char>), // A negated character class, e.g., [^a-z]
+    Digit,                // Shorthand for \d (any digit)
+    Word,                 // Shorthand for \w (alphanumeric character)
 }
 
-fn cointains_alphanumeric(s: &str) -> bool{
-    s.chars().any(|c| c.is_alphanumeric())
-}
 
-fn contains_specific_chars(s: &str, p: &str) -> bool{
-    s.chars().any(|c| p.contains(c))
-}
+fn parse_pattern(pattern: &str) -> Vec<RE> {
+    let mut result = Vec::new();
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
 
-fn match_pattern(input_line: &str, pattern: &str) -> bool {
-    if pattern.chars().count() == 1 {
-        return input_line.contains(pattern);
-    }
-    else if pattern == "\\d"{
-        return contains_digit(input_line);
-    }
-    else if pattern == "\\w"{
-        return cointains_alphanumeric(input_line);
-    }
-    else if pattern.starts_with('[') && pattern.ends_with(']') && pattern.len() >2{
-        if pattern.chars().nth(1).unwrap().to_string() == '^'.to_string(){
-            return !contains_specific_chars(input_line, &pattern[2..pattern.len()-1]);
-        }else{
-            return contains_specific_chars(input_line, &pattern[1..pattern.len()-1]);
+    while i < chars.len() {
+        match chars[i] {
+            '^' => result.push(RE::Start),
+            '$' => result.push(RE::End),
+            '.' => result.push(RE::Dot),
+            '\\' => {
+                if i + 1 < chars.len() {
+                    match chars[i + 1] {
+                        'd' => result.push(RE::Digit),
+                        'w' => result.push(RE::Word),
+                        _ => panic!("Unsupported escape sequence: \\{}", chars[i + 1]),
+                    }
+                    i += 1;
+                } else {
+                    panic!("Pattern ends with an incomplete escape sequence");
+                }
+            }
+            '[' => {
+                // Parse character class
+                if i + 1 < chars.len() && chars[i + 1] == '^' {
+                    // Negated character class
+                    let (class, end_idx) = parse_char_class(&chars, i + 2);
+                    result.push(RE::NegCharClass(class));
+                    i = end_idx;
+                } else {
+                    // Regular character class
+                    let (class, end_idx) = parse_char_class(&chars, i + 1);
+                    result.push(RE::CharClass(class));
+                    i = end_idx;
+                }
+            }
+            '*' => {
+                if let Some(last) = result.pop() {
+                    result.push(RE::Star(Box::new(last)));
+                } else {
+                    panic!("Invalid pattern: '*' cannot be the first character");
+                }
+            }
+            ch => result.push(RE::Char(ch)),
         }
+        i += 1;
     }
-    else {
-        panic!("Unhandled pattern: {}", pattern)
+
+    result
+}
+
+fn parse_char_class(chars: &[char], start: usize) -> (Vec<char>, usize) {
+    let mut class = Vec::new();
+    let mut i = start;
+
+    while i < chars.len() {
+        if chars[i] == ']' {
+            return (class, i);
+        } else if i + 2 < chars.len() && chars[i + 1] == '-' && chars[i + 2] != ']' {
+            // Handle range like a-z
+            let start = chars[i];
+            let end = chars[i + 2];
+            if start <= end {
+                for c in start..=end {
+                    class.push(c);
+                }
+            }
+            i += 2;
+        } else {
+            class.push(chars[i]);
+        }
+        i += 1;
+    }
+
+    panic!("Unterminated character class");
+}
+
+fn match_pattern(pattern: &[RE], text: &str) -> bool {
+    if let Some(RE::Start) = pattern.get(0) {
+        match_here(&pattern[1..], text)
+    } else {
+        let mut text_slice = text;
+        loop {
+            if match_here(pattern, text_slice) {
+                return true;
+            }
+            if text_slice.is_empty() {
+                break;
+            }
+            text_slice = &text_slice[1..];
+        }
+        false
+    }
+}
+
+fn match_here(pattern: &[RE], text: &str) -> bool {
+    if pattern.is_empty() {
+        return true;
+    }
+
+    match &pattern[0] {
+        RE::End => text.is_empty(),
+        RE::Char(c) => {
+            if !text.is_empty() && text.chars().next() == Some(*c) {
+                match_here(&pattern[1..], &text[1..])
+            } else {
+                false
+            }
+        }
+        RE::Dot => {
+            if !text.is_empty() {
+                match_here(&pattern[1..], &text[1..])
+            } else {
+                false
+            }
+        }
+        RE::Star(boxed_re) => match_star(&**boxed_re, &pattern[1..], text),
+        RE::CharClass(class) => {
+            if !text.is_empty() && class.contains(&text.chars().next().unwrap()) {
+                match_here(&pattern[1..], &text[1..])
+            } else {
+                false
+            }
+        }
+        RE::NegCharClass(class) => {
+            if !text.is_empty() && !class.contains(&text.chars().next().unwrap()) {
+                match_here(&pattern[1..], &text[1..])
+            } else {
+                false
+            }
+        }
+        RE::Digit => {
+            if !text.is_empty() && text.chars().next().unwrap().is_ascii_digit() {
+                match_here(&pattern[1..], &text[1..])
+            } else {
+                false
+            }
+        }
+        RE::Word => {
+            if !text.is_empty() && text.chars().next().unwrap().is_alphanumeric() {
+                match_here(&pattern[1..], &text[1..])
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+fn match_star(re: &RE, pattern: &[RE], text: &str) -> bool {
+    let mut text_slice = text;
+    loop {
+        if match_here(pattern, text_slice) {
+            return true;
+        }
+        if text_slice.is_empty() || !matches_char(re, text_slice.chars().next().unwrap()) {
+            break;
+        }
+        text_slice = &text_slice[1..];
+    }
+    false
+}
+
+fn matches_char(re: &RE, c: char) -> bool {
+    match re {
+        RE::Char(ch) => *ch == c,
+        RE::Dot => true,
+        RE::Digit => c.is_ascii_digit(),
+        RE::Word => c.is_alphanumeric(),
+        RE::CharClass(class) => class.contains(&c),
+        RE::NegCharClass(class) => !class.contains(&c),
+        _ => false,
     }
 }
 
 // Usage: echo <input_text> | your_program.sh -E <pattern>
 fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
-
-    if env::args().nth(1).unwrap() != "-E" {
-        println!("Expected first argument to be '-E'");
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 3 || args[1] != "-E" {
+        eprintln!("Usage: your_program -E <pattern>");
         process::exit(1);
     }
 
-    let pattern = env::args().nth(2).unwrap();
-    let mut input_line = String::new();
+    let pattern_str = &args[2];
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).expect("Failed to read input");
+    let input = input.trim(); // Remove newline character
 
-    io::stdin().read_line(&mut input_line).unwrap();
-
-    // Uncomment this block to pass the first stage
-    if match_pattern(&input_line, &pattern) {
-        process::exit(0)
+    let pattern = parse_pattern(pattern_str);
+    if match_pattern(&pattern, input) {
+        process::exit(0); // Pattern matches
     } else {
-        process::exit(1)
+        process::exit(1); // Pattern does not match
     }
 }
