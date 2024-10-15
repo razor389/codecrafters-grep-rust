@@ -1,3 +1,4 @@
+use core::panic;
 use std::env;
 use std::io;
 use std::process;
@@ -25,7 +26,11 @@ fn match_pattern(input_line: &str, pattern: &str) -> bool {
         return cointains_alphanumeric(input_line);
     }
     else if pattern.starts_with('[') && pattern.ends_with(']') && pattern.len() >2{
-        return contains_specific_chars(input_line, &pattern[1..pattern.len()-1]);
+        if pattern.chars().nth(1).unwrap().to_string() == '^'.to_string(){
+            panic!("neg chars not implemented");
+        }else{
+            return contains_specific_chars(input_line, &pattern[1..pattern.len()-1]);
+        }
     }
     else {
         panic!("Unhandled pattern: {}", pattern)
