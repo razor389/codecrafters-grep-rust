@@ -4,26 +4,25 @@ use std::process;
 
 #[derive(Debug, Clone)]
 enum RE {
-    Char(char),                // A literal character
-    Question(Box<RE>),         // A character or regex type followed by '?'
-    Plus(Box<RE>),             // A character or regex type followed by '+'
-    Dot,                       // The '.' metacharacter
-    Start,                     // The '^' metacharacter
-    End,                       // The '$' metacharacter
-    CharClass(Vec<char>),      // A character class, e.g., [a-z]
-    NegCharClass(Vec<char>),   // A negated character class, e.g., [^a-z]
-    Digit,                     // Shorthand for \d (any digit)
-    Word,                      // Shorthand for \w (alphanumeric character)
+    Char(char),           // A literal character
+    Question(Box<RE>),        // A character or regex type followed by '?'
+    Plus(Box<RE>),        // A character or regex type followed by '+'
+    Dot,                  // The '.' metacharacter
+    Start,                // The '^' metacharacter
+    End,                  // The '$' metacharacter
+    CharClass(Vec<char>), // A character class, e.g., [a-z]
+    NegCharClass(Vec<char>), // A negated character class, e.g., [^a-z]
+    Digit,                // Shorthand for \d (any digit)
+    Word,                 // Shorthand for \w (alphanumeric character)
     Alternation(Box<RE>, Box<RE>), // Alternation between two patterns, e.g., (cat|dog)
-    Group(Vec<RE>, usize),     // A grouped sub-pattern with its group number
-    Backreference(usize),      // A backreference to a previous group, e.g., \1
+    Group(Vec<RE>),       // A grouped sub-pattern, e.g., (cat)
 }
+
 
 fn parse_pattern(pattern: &str) -> Vec<RE> {
     let mut result = Vec::new();
     let chars: Vec<char> = pattern.chars().collect();
     let mut i = 0;
-    let mut group_counter = 1; // To track the group number
 
     while i < chars.len() {
         match chars[i] {
@@ -36,10 +35,6 @@ fn parse_pattern(pattern: &str) -> Vec<RE> {
                         'd' => result.push(RE::Digit),
                         'w' => result.push(RE::Word),
                         '\\' => result.push(RE::Char('\\')),
-                        '1'..='9' => {
-                            let group_num = chars[i + 1].to_digit(10).unwrap() as usize;
-                            result.push(RE::Backreference(group_num));
-                        }
                         _ => panic!("Unsupported escape sequence: \\{}", chars[i + 1]),
                     }
                     i += 1;
@@ -59,10 +54,8 @@ fn parse_pattern(pattern: &str) -> Vec<RE> {
                 }
             }
             '(' => {
-                i += 1; // Move past '('
-                let (group, end_idx) = parse_alternation(&chars, i, group_counter);
+                let (group, end_idx) = parse_alternation(&chars, i + 1);
                 result.push(group);
-                group_counter += 1;
                 i = end_idx;
             }
             '?' => {
@@ -87,7 +80,7 @@ fn parse_pattern(pattern: &str) -> Vec<RE> {
     result
 }
 
-fn parse_sequence(chars: &[char], i: &mut usize, group_counter: usize) -> Vec<RE> {
+fn parse_sequence(chars: &[char], i: &mut usize) -> Vec<RE> {
     let mut result = Vec::new();
 
     while *i < chars.len() {
@@ -102,10 +95,6 @@ fn parse_sequence(chars: &[char], i: &mut usize, group_counter: usize) -> Vec<RE
                         'd' => result.push(RE::Digit),
                         'w' => result.push(RE::Word),
                         '\\' => result.push(RE::Char('\\')),
-                        '1'..='9' => {
-                            let group_num = chars[*i + 1].to_digit(10).unwrap() as usize;
-                            result.push(RE::Backreference(group_num));
-                        }
                         _ => panic!("Unsupported escape sequence: \\{}", chars[*i + 1]),
                     }
                     *i += 1;
@@ -126,7 +115,7 @@ fn parse_sequence(chars: &[char], i: &mut usize, group_counter: usize) -> Vec<RE
             }
             '(' => {
                 *i += 1; // Move past '('
-                let (group, end_idx) = parse_alternation(chars, *i, group_counter);
+                let (group, end_idx) = parse_alternation(chars, *i);
                 result.push(group);
                 *i = end_idx;
             }
@@ -152,22 +141,23 @@ fn parse_sequence(chars: &[char], i: &mut usize, group_counter: usize) -> Vec<RE
     result
 }
 
-fn parse_alternation(chars: &[char], start: usize, group_number: usize) -> (RE, usize) {
+
+fn parse_alternation(chars: &[char], start: usize) -> (RE, usize) {
     let mut i = start;
-    let left_side = parse_sequence(chars, &mut i, group_number);
+    let left_side = parse_sequence(chars, &mut i);
     if i < chars.len() && chars[i] == '|' {
         i += 1; // Move past '|'
-        let right_side = parse_sequence(chars, &mut i, group_number);
+        let right_side = parse_sequence(chars, &mut i);
         if i < chars.len() && chars[i] == ')' {
             return (
-                RE::Alternation(Box::new(RE::Group(left_side, group_number)), Box::new(RE::Group(right_side, group_number))),
+                RE::Alternation(Box::new(RE::Group(left_side)), Box::new(RE::Group(right_side))),
                 i,
             );
         } else {
             panic!("Unmatched parenthesis or incomplete alternation");
         }
     } else if i < chars.len() && chars[i] == ')' {
-        return (RE::Group(left_side, group_number), i);
+        return (RE::Group(left_side), i);
     } else {
         panic!("Unmatched parenthesis or invalid alternation syntax");
     }
@@ -200,13 +190,13 @@ fn parse_char_class(chars: &[char], start: usize) -> (Vec<char>, usize) {
     panic!("Unterminated character class");
 }
 
-fn match_pattern<'a>(pattern: &[RE], text: &'a str, groups: &mut Vec<Option<&'a str>>) -> bool  {
+fn match_pattern(pattern: &[RE], text: &str) -> bool {
     if let Some(RE::Start) = pattern.get(0) {
-        match_here(&pattern[1..], text, groups)
+        match_here(&pattern[1..], text)
     } else {
         let mut text_slice = text;
         loop {
-            if match_here(pattern, text_slice, groups) {
+            if match_here(pattern, text_slice) {
                 return true;
             }
             if text_slice.is_empty() {
@@ -218,7 +208,7 @@ fn match_pattern<'a>(pattern: &[RE], text: &'a str, groups: &mut Vec<Option<&'a 
     }
 }
 
-fn match_here<'a>(pattern: &[RE], text: &'a str, groups: &mut Vec<Option<&'a str>>) -> bool {
+fn match_here(pattern: &[RE], text: &str) -> bool {
     if pattern.is_empty() {
         return true;
     }
@@ -227,76 +217,60 @@ fn match_here<'a>(pattern: &[RE], text: &'a str, groups: &mut Vec<Option<&'a str
         RE::End => text.is_empty(),
         RE::Char(c) => {
             if !text.is_empty() && text.chars().next() == Some(*c) {
-                match_here(&pattern[1..], &text[1..], groups)
+                match_here(&pattern[1..], &text[1..])
             } else {
                 false
             }
         }
         RE::Dot => {
             if !text.is_empty() {
-                match_here(&pattern[1..], &text[1..], groups)
+                match_here(&pattern[1..], &text[1..])
             } else {
                 false
             }
         }
-        RE::Question(boxed_re) => match_question(&**boxed_re, &pattern[1..], text, groups),
-        RE::Plus(boxed_re) => match_plus(&**boxed_re, &pattern[1..], text, groups),
+        RE::Question(boxed_re) => match_question(&**boxed_re, &pattern[1..], text),
+        RE::Plus(boxed_re) => match_plus(&**boxed_re, &pattern[1..], text),
         RE::CharClass(class) => {
             if !text.is_empty() && class.contains(&text.chars().next().unwrap()) {
-                match_here(&pattern[1..], &text[1..], groups)
+                match_here(&pattern[1..], &text[1..])
             } else {
                 false
             }
         }
         RE::NegCharClass(class) => {
             if !text.is_empty() && !class.contains(&text.chars().next().unwrap()) {
-                match_here(&pattern[1..], &text[1..], groups)
+                match_here(&pattern[1..], &text[1..])
             } else {
                 false
             }
         }
         RE::Digit => {
             if !text.is_empty() && text.chars().next().unwrap().is_ascii_digit() {
-                match_here(&pattern[1..], &text[1..], groups)
+                match_here(&pattern[1..], &text[1..])
             } else {
                 false
             }
         }
         RE::Word => {
             if !text.is_empty() && text.chars().next().unwrap().is_alphanumeric() {
-                match_here(&pattern[1..], &text[1..], groups)
+                match_here(&pattern[1..], &text[1..])
             } else {
                 false
             }
         }
         RE::Alternation(left, right) => {
-            match_pattern(&[left.as_ref().clone()], text, groups) || match_pattern(&[right.as_ref().clone()], text, groups)
+            match_pattern(&[left.as_ref().clone()], text) || match_pattern(&[right.as_ref().clone()], text)
         }
-        RE::Group(group_pattern, group_number) => {
-            let group_start = text;
-            if match_pattern(group_pattern, text, groups) {
-                let group_end = text.len() - group_start.len();
-                groups[*group_number] = Some(&group_start[..group_end]);
-                true
-            } else {
-                false
-            }
-        }
-        RE::Backreference(group_number) => {
-            if let Some(matched_text) = groups.get(*group_number).and_then(|g| *g) {
-                text.starts_with(matched_text) && match_here(&pattern[1..], &text[matched_text.len()..], groups)
-            } else {
-                false
-            }
-        }
+        RE::Group(group_pattern) => match_pattern(group_pattern, text),
         _ => false,
     }
 }
 
-fn match_question<'a>(re: &RE, pattern: &[RE], text: &'a str, groups: &mut Vec<Option<&'a str>>) -> bool  {
+fn match_question(re: &RE, pattern: &[RE], text: &str) -> bool {
     let mut text_slice = text;
     loop {
-        if match_here(pattern, text_slice, groups) {
+        if match_here(pattern, text_slice) {
             return true;
         }
         if text_slice.is_empty() || !matches_char(re, text_slice.chars().next().unwrap()) {
@@ -307,7 +281,7 @@ fn match_question<'a>(re: &RE, pattern: &[RE], text: &'a str, groups: &mut Vec<O
     false
 }
 
-fn match_plus<'a>(re: &RE, pattern: &[RE], text: &'a str, groups: &mut Vec<Option<&'a str>>) -> bool{
+fn match_plus(re: &RE, pattern: &[RE], text: &str) -> bool {
     let mut text_slice = text;
     // First, we must match at least one occurrence of the character
     if !text_slice.is_empty() && matches_char(re, text_slice.chars().next().unwrap()) {
@@ -318,7 +292,7 @@ fn match_plus<'a>(re: &RE, pattern: &[RE], text: &'a str, groups: &mut Vec<Optio
 
     // Now, match zero or more occurrences (like a '?')
     loop {
-        if match_here(pattern, text_slice, groups) {
+        if match_here(pattern, text_slice) {
             return true;
         }
         if text_slice.is_empty() || !matches_char(re, text_slice.chars().next().unwrap()) {
@@ -328,7 +302,6 @@ fn match_plus<'a>(re: &RE, pattern: &[RE], text: &'a str, groups: &mut Vec<Optio
     }
     false
 }
-
 
 fn matches_char(re: &RE, c: char) -> bool {
     match re {
@@ -355,15 +328,8 @@ fn main() {
     std::io::stdin().read_line(&mut input).expect("Failed to read input");
     let input = input.trim(); // Remove newline character
 
-    // Parse the pattern
     let pattern = parse_pattern(pattern_str);
-
-    // Initialize a vector to store groups; the size should be sufficient for the expected number of groups
-    let max_groups = 10; // Arbitrarily chosen, can be increased based on needs
-    let mut groups = vec![None; max_groups];
-
-    // Try to match the pattern with the input text
-    if match_pattern(&pattern, input, &mut groups) {
+    if match_pattern(&pattern, input) {
         process::exit(0); // Pattern matches
     } else {
         process::exit(1); // Pattern does not match
