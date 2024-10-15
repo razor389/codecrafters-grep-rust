@@ -31,6 +31,7 @@ fn parse_pattern(pattern: &str) -> Vec<RE> {
                     match chars[i + 1] {
                         'd' => result.push(RE::Digit),
                         'w' => result.push(RE::Word),
+                        '\\' => result.push(RE::Char('\\')),
                         _ => panic!("Unsupported escape sequence: \\{}", chars[i + 1]),
                     }
                     i += 1;
