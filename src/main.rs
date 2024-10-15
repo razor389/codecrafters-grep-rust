@@ -27,7 +27,7 @@ fn match_pattern(input_line: &str, pattern: &str) -> bool {
     }
     else if pattern.starts_with('[') && pattern.ends_with(']') && pattern.len() >2{
         if pattern.chars().nth(1).unwrap().to_string() == '^'.to_string(){
-            panic!("neg chars not implemented");
+            return !contains_specific_chars(input_line, &pattern[2..pattern.len()-1]);
         }else{
             return contains_specific_chars(input_line, &pattern[1..pattern.len()-1]);
         }
