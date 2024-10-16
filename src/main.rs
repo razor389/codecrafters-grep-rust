@@ -14,7 +14,7 @@ enum RE {
     NegCharClass(Vec<char>),    // A negated character class, e.g., [^a-z]
     Digit,                      // Shorthand for \d (any digit)
     Word,                       // Shorthand for \w (alphanumeric character)
-    Alternation(Box<RE>, Box<RE>), // Alternation between two patterns, e.g., (cat|dog)
+    Alternation(Vec<RE>, Vec<RE>), // Alternation between two patterns, e.g., (cat|dog)
     Group(Vec<RE>),             // A grouped sub-pattern, e.g., (cat)
     Backreference(usize),       // A backreference to a previously captured group, e.g., \1
 }
@@ -144,13 +144,13 @@ impl RegexEngine {
             RE::Alternation(left, right) => {
                 let original_captures = self.captures.clone();
     
-                if self.match_pattern(&[RE::Group(vec![left.as_ref().clone()])], text) {
+                if self.match_pattern(&left.clone(), text) {
                     return true;
                 }
     
                 self.captures = original_captures;
     
-                self.match_pattern(&[RE::Group(vec![right.as_ref().clone()])], text)
+                self.match_pattern(&right.clone(), text)
             }
             _ => false,
         }
@@ -356,7 +356,7 @@ fn parse_alternation(chars: &[char], start: usize) -> (RE, usize) {
         if i < chars.len() && chars[i] == ')' {
             // Wrap the alternation in a group directly
             return (
-                RE::Group(vec![RE::Alternation(Box::new(RE::Group(left_side)), Box::new(RE::Group(right_side)))]),
+                RE::Group(vec![RE::Alternation(left_side, right_side)]),
                 i,
             );
         } else {
