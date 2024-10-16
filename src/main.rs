@@ -62,7 +62,7 @@ impl RegexEngine {
         if pattern.is_empty() {
             return true;
         }
-
+    
         match &pattern[0] {
             RE::End => text.is_empty(),
             RE::Char(c) => {
@@ -121,47 +121,37 @@ impl RegexEngine {
                 }
             }
             RE::Group(group_pattern) => {
-                // Attempt to match the group and capture the substring
                 for len in 0..=text.len() {
-                    // Take a slice of the text up to the current length
                     let slice = &text[..len];
-                    let original_captures = self.captures.clone(); // Save current state of captures
+                    let original_captures = self.captures.clone();
     
                     if self.match_pattern(group_pattern, slice) {
-                        // Successfully matched the group; store the capture
                         let group_index = self.captures.len() + 1;
                         self.captures.insert(group_index, slice.to_string());
     
-                        // Try to match the rest of the pattern with the remaining text
                         if self.match_here(&pattern[1..], &text[len..]) {
                             return true;
                         }
     
-                        // Restore the captures if the rest of the pattern does not match
                         self.captures = original_captures;
                     }
                 }
-    
                 false
             }
             RE::Alternation(left, right) => {
-                // Clone captures so we can backtrack if needed
                 let original_captures = self.captures.clone();
     
-                // Try the left side of the alternation as a group
                 if self.match_pattern(&[RE::Group(vec![left.as_ref().clone()])], text) {
                     return true;
                 }
     
-                // Restore captures if the left side fails
                 self.captures = original_captures;
     
-                // Try the right side of the alternation as a group
                 self.match_pattern(&[RE::Group(vec![right.as_ref().clone()])], text)
             }
             _ => false,
         }
-    }
+    }    
 
     fn match_question(&mut self, re: &RE, pattern: &[RE], text: &str) -> bool {
         // First, try to match the rest of the pattern without consuming any character (zero occurrences)
