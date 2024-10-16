@@ -32,24 +32,23 @@ impl RegexEngine {
         Self {
             pattern: parsed_pattern,
             captures: HashMap::new(),
-            //group_index: 0,
         }
     }
 
     fn match_text(&mut self, text: &str) -> bool {
         let pattern = self.pattern.clone();
         self.captures.clear();
-        //self.group_index = 0; // Reset group index for each new match attempt
-        self.match_pattern(&pattern, text, 0)
+        
+        self.match_pattern(&pattern, text, 0, &mut HashMap::new())
     }
 
-    fn match_pattern(&mut self, pattern: &[RE], text: &str, mut local_group_index: usize) -> bool {
+    fn match_pattern(&mut self, pattern: &[RE], text: &str, mut local_group_index: usize, local_captures: &mut HashMap<usize, String>) -> bool {
         if let Some(RE::Start) = pattern.get(0) {
-            self.match_here(&pattern[1..], text, local_group_index)
+            self.match_here(&pattern[1..], text, local_group_index, local_captures)
         } else {
             let mut text_slice = text;
             loop {
-                if self.match_here(pattern, text_slice, local_group_index) {
+                if self.match_here(pattern, text_slice, local_group_index, local_captures) {
                     return true;
                 }
                 if text_slice.is_empty() {
@@ -61,7 +60,7 @@ impl RegexEngine {
         }
     }
 
-    fn match_here(&mut self, pattern: &[RE], text: &str, mut local_group_index: usize) -> bool {
+    fn match_here(&mut self, pattern: &[RE], text: &str, mut local_group_index: usize, local_captures: &mut HashMap<usize, String>) -> bool {
         if pattern.is_empty() {
             return true;
         }
@@ -70,54 +69,52 @@ impl RegexEngine {
             RE::End => text.is_empty(),
             RE::Char(c) => {
                 if !text.is_empty() && text.chars().next() == Some(*c) {
-                    self.match_here(&pattern[1..], &text[1..], local_group_index)
+                    self.match_here(&pattern[1..], &text[1..], local_group_index, local_captures)
                 } else {
                     false
                 }
             }
             RE::Dot => {
                 if !text.is_empty() {
-                    self.match_here(&pattern[1..], &text[1..], local_group_index)
+                    self.match_here(&pattern[1..], &text[1..], local_group_index, local_captures)
                 } else {
                     false
                 }
             }
-            RE::Question(boxed_re) => self.match_question(&**boxed_re, &pattern[1..], text, local_group_index),
-            RE::Plus(boxed_re) => self.match_plus(&**boxed_re, &pattern[1..], text, local_group_index),
+            RE::Question(boxed_re) => self.match_question(&**boxed_re, &pattern[1..], text, local_group_index, local_captures),
+            RE::Plus(boxed_re) => self.match_plus(&**boxed_re, &pattern[1..], text, local_group_index, local_captures),
             RE::CharClass(class) => {
                 if !text.is_empty() && class.contains(&text.chars().next().unwrap()) {
-                    self.match_here(&pattern[1..], &text[1..], local_group_index)
+                    self.match_here(&pattern[1..], &text[1..], local_group_index, local_captures)
                 } else {
                     false
                 }
             }
             RE::NegCharClass(class) => {
                 if !text.is_empty() && !class.contains(&text.chars().next().unwrap()) {
-                    self.match_here(&pattern[1..], &text[1..], local_group_index)
+                    self.match_here(&pattern[1..], &text[1..], local_group_index, local_captures)
                 } else {
                     false
                 }
             }
             RE::Digit => {
                 if !text.is_empty() && text.chars().next().unwrap().is_ascii_digit() {
-                    self.match_here(&pattern[1..], &text[1..], local_group_index)
+                    self.match_here(&pattern[1..], &text[1..], local_group_index, local_captures)
                 } else {
                     false
                 }
             }
             RE::Word => {
                 if !text.is_empty() && text.chars().next().unwrap().is_alphanumeric() {
-                    self.match_here(&pattern[1..], &text[1..], local_group_index)
+                    self.match_here(&pattern[1..], &text[1..], local_group_index, local_captures)
                 } else {
                     false
                 }
             }
             RE::Backreference(group_index) => {
-                println!("trying to capture: {}", group_index);
-                println!("available captures: {:#?}", self.captures);
-                if let Some(captured) = self.captures.get(group_index) {
+                if let Some(captured) = local_captures.get(group_index) {
                     if text.starts_with(captured) {
-                        self.match_here(&pattern[1..], &text[captured.len()..], local_group_index)
+                        self.match_here(&pattern[1..], &text[captured.len()..], local_group_index, local_captures)
                     } else {
                         false
                     }
@@ -127,54 +124,50 @@ impl RegexEngine {
             }
             RE::Group(group_pattern) => {
                 // Save the current state of group_index and captures
-                let original_captures = self.captures.clone();
                 let original_group_index = local_group_index;
+                let mut new_captures = local_captures.clone();
 
                 // Increment local_group_index for this group
                 local_group_index += 1;
                 let group_index = local_group_index;
 
-                // Attempt to match the group at different lengths
                 for len in 0..=text.len() {
                     let slice = &text[..len];
-                    self.captures = original_captures.clone(); // Restore captures before each attempt
+                    new_captures = local_captures.clone(); // Restore captures before each attempt
 
-                    if self.match_pattern(group_pattern, slice, local_group_index) {
+                    if self.match_pattern(group_pattern, slice, local_group_index, &mut new_captures) {
                         // Only assign the capture if the group matches
-                        self.captures.insert(group_index, slice.to_string());
+                        new_captures.insert(group_index, slice.to_string());
 
-                        if self.match_here(&pattern[1..], &text[len..], local_group_index) {
+                        if self.match_here(&pattern[1..], &text[len..], local_group_index, &mut new_captures) {
+                            *local_captures = new_captures; // Update the local captures after a successful match
                             return true;
                         }
                     }
                 }
 
-                // Restore state if no match is found
-                self.captures = original_captures;
-                local_group_index = original_group_index;
-
                 false
             }
             RE::Alternation(left, right) => {
-                let original_captures = self.captures.clone();
+                let original_captures = local_captures.clone();
                 let original_group_index = local_group_index;
 
                 // Try matching the left side of the alternation
-                if self.match_pattern(&left, text, local_group_index) {
+                if self.match_pattern(&left, text, local_group_index, local_captures) {
                     return true;
                 }
 
                 // Restore state if the left branch fails
-                self.captures = original_captures.clone();
+                *local_captures = original_captures.clone();
                 local_group_index = original_group_index;
 
                 // Try matching the right side of the alternation
-                if self.match_pattern(&right, text, local_group_index) {
+                if self.match_pattern(&right, text, local_group_index, local_captures) {
                     return true;
                 }
 
                 // Restore state if both branches fail
-                self.captures = original_captures;
+                *local_captures = original_captures;
                 local_group_index = original_group_index;
 
                 false
@@ -183,19 +176,19 @@ impl RegexEngine {
         }
     }
 
-    fn match_question(&mut self, re: &RE, pattern: &[RE], text: &str, local_group_index: usize) -> bool {
-        if self.match_here(pattern, text, local_group_index) {
+    fn match_question(&mut self, re: &RE, pattern: &[RE], text: &str, local_group_index: usize, local_captures: &mut HashMap<usize, String>) -> bool {
+        if self.match_here(pattern, text, local_group_index, local_captures) {
             return true;
         }
 
         if !text.is_empty() && self.matches_char(re, text.chars().next().unwrap()) {
-            self.match_here(pattern, &text[1..], local_group_index)
+            self.match_here(pattern, &text[1..], local_group_index, local_captures)
         } else {
             false
         }
     }
 
-    fn match_plus(&mut self, re: &RE, pattern: &[RE], text: &str, mut local_group_index: usize) -> bool {
+    fn match_plus(&mut self, re: &RE, pattern: &[RE], text: &str, local_group_index: usize, local_captures: &mut HashMap<usize, String>) -> bool {
         let mut text_slice = text;
 
         if !text_slice.is_empty() && self.matches_char(re, text_slice.chars().next().unwrap()) {
@@ -205,7 +198,7 @@ impl RegexEngine {
         }
 
         loop {
-            if self.match_here(pattern, text_slice, local_group_index) {
+            if self.match_here(pattern, text_slice, local_group_index, local_captures) {
                 return true;
             }
             if text_slice.is_empty() || !self.matches_char(re, text_slice.chars().next().unwrap()) {
@@ -215,7 +208,6 @@ impl RegexEngine {
         }
         false
     }
-    
 
     fn matches_char(&self, re: &RE, c: char) -> bool {
         match re {
