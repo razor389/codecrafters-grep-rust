@@ -275,7 +275,7 @@ fn parse_pattern(pattern: &str) -> Vec<RE> {
         }
         i += 1;
     }
-
+    println!("pattern to match: {:#?}", result);
     result
 }
 
