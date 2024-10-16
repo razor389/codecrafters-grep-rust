@@ -121,14 +121,19 @@ impl RegexEngine {
                 }
             }
             RE::Group(group_pattern) => {
-                // Match the group exactly as defined in the group pattern
-                if self.match_pattern(group_pattern, text) {
-                    let matched_len = text.len() - self.match_remaining_len(text, group_pattern);
-                    if matched_len > 0 {
-                        let captured_str = &text[..matched_len];
+                for len in 0..=text.len() {
+                    let slice = &text[..len];
+                    let original_captures = self.captures.clone();
+    
+                    if self.match_pattern(group_pattern, slice) {
                         let group_index = self.captures.len() + 1;
-                        self.captures.insert(group_index, captured_str.to_string());
-                        return self.match_here(&pattern[1..], &text[matched_len..]);
+                        self.captures.insert(group_index, slice.to_string());
+    
+                        if self.match_here(&pattern[1..], &text[len..]) {
+                            return true;
+                        }
+    
+                        self.captures = original_captures;
                     }
                 }
                 false
@@ -182,25 +187,6 @@ impl RegexEngine {
             text_slice = &text_slice[1..];
         }
         false
-    }
-    
-    fn match_remaining_len(&mut self, text: &str, pattern: &[RE]) -> usize {
-        let mut length = 0;
-        let mut text_slice = text;
-        for re in pattern {
-            match re {
-                RE::Char(c) => {
-                    if !text_slice.is_empty() && text_slice.chars().next() == Some(*c) {
-                        length += 1;
-                        text_slice = &text_slice[1..];
-                    } else {
-                        return 0;
-                    }
-                }
-                _ => break, // Simplified for cases only involving exact matching (expand as needed)
-            }
-        }
-        length
     }
     
 
