@@ -164,6 +164,7 @@ impl<'a> MatchContext<'a> {
                 false
             }
             RE::Backreference(group_index) => {
+                println!("trying group index {} with available captures {:#?}", group_index, self.captures);
                 if let Some(captured) = self.captures.get(group_index) {
                     if self.text.starts_with(captured) {
                         let mut local_context = self.clone();
