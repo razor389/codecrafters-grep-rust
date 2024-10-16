@@ -1,21 +1,190 @@
-use core::panic;
+use std::collections::HashMap;
 use std::env;
 use std::process;
 
 #[derive(Debug, Clone)]
 enum RE {
-    Char(char),           // A literal character
-    Question(Box<RE>),        // A character or regex type followed by '?'
-    Plus(Box<RE>),        // A character or regex type followed by '+'
-    Dot,                  // The '.' metacharacter
-    Start,                // The '^' metacharacter
-    End,                  // The '$' metacharacter
-    CharClass(Vec<char>), // A character class, e.g., [a-z]
-    NegCharClass(Vec<char>), // A negated character class, e.g., [^a-z]
-    Digit,                // Shorthand for \d (any digit)
-    Word,                 // Shorthand for \w (alphanumeric character)
+    Char(char),                 // A literal character
+    Question(Box<RE>),          // A character or regex type followed by '?'
+    Plus(Box<RE>),              // A character or regex type followed by '+'
+    Dot,                        // The '.' metacharacter
+    Start,                      // The '^' metacharacter
+    End,                        // The '$' metacharacter
+    CharClass(Vec<char>),       // A character class, e.g., [a-z]
+    NegCharClass(Vec<char>),    // A negated character class, e.g., [^a-z]
+    Digit,                      // Shorthand for \d (any digit)
+    Word,                       // Shorthand for \w (alphanumeric character)
     Alternation(Box<RE>, Box<RE>), // Alternation between two patterns, e.g., (cat|dog)
-    Group(Vec<RE>),       // A grouped sub-pattern, e.g., (cat)
+    Group(Vec<RE>),             // A grouped sub-pattern, e.g., (cat)
+    Backreference(usize),       // A backreference to a previously captured group, e.g., \1
+}
+
+struct RegexEngine {
+    pattern: Vec<RE>,
+    captures: HashMap<usize, String>, // Captured groups stored by their index
+}
+
+impl RegexEngine {
+    fn new(pattern: &str) -> Self {
+        let parsed_pattern = parse_pattern(pattern);
+        Self {
+            pattern: parsed_pattern,
+            captures: HashMap::new(),
+        }
+    }
+
+    fn match_text(&mut self, text: &str) -> bool {
+        // Clone the pattern so we only borrow `self` mutably during the actual matching phase
+        let pattern = self.pattern.clone();
+        self.captures.clear();
+        self.match_pattern(&pattern, text)
+    }    
+
+    fn match_pattern(&mut self, pattern: &[RE], text: &str) -> bool {
+        if let Some(RE::Start) = pattern.get(0) {
+            self.match_here(&pattern[1..], text)
+        } else {
+            let mut text_slice = text;
+            loop {
+                if self.match_here(pattern, text_slice) {
+                    return true;
+                }
+                if text_slice.is_empty() {
+                    break;
+                }
+                text_slice = &text_slice[1..];
+            }
+            false
+        }
+    }
+
+    fn match_here(&mut self, pattern: &[RE], text: &str) -> bool {
+        if pattern.is_empty() {
+            return true;
+        }
+
+        match &pattern[0] {
+            RE::End => text.is_empty(),
+            RE::Char(c) => {
+                if !text.is_empty() && text.chars().next() == Some(*c) {
+                    self.match_here(&pattern[1..], &text[1..])
+                } else {
+                    false
+                }
+            }
+            RE::Dot => {
+                if !text.is_empty() {
+                    self.match_here(&pattern[1..], &text[1..])
+                } else {
+                    false
+                }
+            }
+            RE::Question(boxed_re) => self.match_question(&**boxed_re, &pattern[1..], text),
+            RE::Plus(boxed_re) => self.match_plus(&**boxed_re, &pattern[1..], text),
+            RE::CharClass(class) => {
+                if !text.is_empty() && class.contains(&text.chars().next().unwrap()) {
+                    self.match_here(&pattern[1..], &text[1..])
+                } else {
+                    false
+                }
+            }
+            RE::NegCharClass(class) => {
+                if !text.is_empty() && !class.contains(&text.chars().next().unwrap()) {
+                    self.match_here(&pattern[1..], &text[1..])
+                } else {
+                    false
+                }
+            }
+            RE::Digit => {
+                if !text.is_empty() && text.chars().next().unwrap().is_ascii_digit() {
+                    self.match_here(&pattern[1..], &text[1..])
+                } else {
+                    false
+                }
+            }
+            RE::Word => {
+                if !text.is_empty() && text.chars().next().unwrap().is_alphanumeric() {
+                    self.match_here(&pattern[1..], &text[1..])
+                } else {
+                    false
+                }
+            }
+            RE::Backreference(group_index) => {
+                if let Some(captured) = self.captures.get(group_index) {
+                    if text.starts_with(captured) {
+                        self.match_here(&pattern[1..], &text[captured.len()..])
+                    } else {
+                        false
+                    }
+                } else {
+                    false // No capture for this group yet
+                }
+            }
+            RE::Group(group_pattern) => {
+                let start_pos = text.len();
+                if self.match_pattern(group_pattern, text) {
+                    let end_pos = text.len();
+                    let captured_str = &text[..start_pos - end_pos];
+                    // Find the group index for this group
+                    let group_index = self.captures.len() + 1;
+                    self.captures.insert(group_index, captured_str.to_string());
+                    self.match_here(&pattern[1..], &text[captured_str.len()..])
+                } else {
+                    false
+                }
+            }
+            RE::Alternation(left, right) => {
+                self.match_pattern(&[left.as_ref().clone()], text) || self.match_pattern(&[right.as_ref().clone()], text)
+            }
+            _ => false,
+        }
+    }
+
+    fn match_question(&mut self, re: &RE, pattern: &[RE], text: &str) -> bool {
+        let mut text_slice = text;
+        loop {
+            if self.match_here(pattern, text_slice) {
+                return true;
+            }
+            if text_slice.is_empty() || !self.matches_char(re, text_slice.chars().next().unwrap()) {
+                break;
+            }
+            text_slice = &text_slice[1..];
+        }
+        false
+    }
+
+    fn match_plus(&mut self, re: &RE, pattern: &[RE], text: &str) -> bool {
+        let mut text_slice = text;
+        if !text_slice.is_empty() && self.matches_char(re, text_slice.chars().next().unwrap()) {
+            text_slice = &text_slice[1..];
+        } else {
+            return false;
+        }
+
+        loop {
+            if self.match_here(pattern, text_slice) {
+                return true;
+            }
+            if text_slice.is_empty() || !self.matches_char(re, text_slice.chars().next().unwrap()) {
+                break;
+            }
+            text_slice = &text_slice[1..];
+        }
+        false
+    }
+
+    fn matches_char(&self, re: &RE, c: char) -> bool {
+        match re {
+            RE::Char(ch) => *ch == c,
+            RE::Dot => true,
+            RE::Digit => c.is_ascii_digit(),
+            RE::Word => c.is_alphanumeric(),
+            RE::CharClass(class) => class.contains(&c),
+            RE::NegCharClass(class) => !class.contains(&c),
+            _ => false,
+        }
+    }
 }
 
 fn parse_pattern(pattern: &str) -> Vec<RE> {
@@ -33,6 +202,10 @@ fn parse_pattern(pattern: &str) -> Vec<RE> {
                     match chars[i + 1] {
                         'd' => result.push(RE::Digit),
                         'w' => result.push(RE::Word),
+                        '1'..='9' => {
+                            let group_index = chars[i + 1].to_digit(10).unwrap() as usize;
+                            result.push(RE::Backreference(group_index));
+                        }
                         '\\' => result.push(RE::Char('\\')),
                         _ => panic!("Unsupported escape sequence: \\{}", chars[i + 1]),
                     }
@@ -93,6 +266,10 @@ fn parse_sequence(chars: &[char], i: &mut usize) -> Vec<RE> {
                     match chars[*i + 1] {
                         'd' => result.push(RE::Digit),
                         'w' => result.push(RE::Word),
+                        '1'..='9' => {
+                            let group_index = chars[*i + 1].to_digit(10).unwrap() as usize;
+                            result.push(RE::Backreference(group_index));
+                        }
                         '\\' => result.push(RE::Char('\\')),
                         _ => panic!("Unsupported escape sequence: \\{}", chars[*i + 1]),
                     }
@@ -187,131 +364,6 @@ fn parse_char_class(chars: &[char], start: usize) -> (Vec<char>, usize) {
     panic!("Unterminated character class");
 }
 
-fn match_pattern(pattern: &[RE], text: &str) -> bool {
-    if let Some(RE::Start) = pattern.get(0) {
-        match_here(&pattern[1..], text)
-    } else {
-        let mut text_slice = text;
-        loop {
-            if match_here(pattern, text_slice) {
-                return true;
-            }
-            if text_slice.is_empty() {
-                break;
-            }
-            text_slice = &text_slice[1..];
-        }
-        false
-    }
-}
-
-fn match_here(pattern: &[RE], text: &str) -> bool {
-    if pattern.is_empty() {
-        return true;
-    }
-
-    match &pattern[0] {
-        RE::End => text.is_empty(),
-        RE::Char(c) => {
-            if !text.is_empty() && text.chars().next() == Some(*c) {
-                match_here(&pattern[1..], &text[1..])
-            } else {
-                false
-            }
-        }
-        RE::Dot => {
-            if !text.is_empty() {
-                match_here(&pattern[1..], &text[1..])
-            } else {
-                false
-            }
-        }
-        RE::Question(boxed_re) => match_question(&**boxed_re, &pattern[1..], text),
-        RE::Plus(boxed_re) => match_plus(&**boxed_re, &pattern[1..], text),
-        RE::CharClass(class) => {
-            if !text.is_empty() && class.contains(&text.chars().next().unwrap()) {
-                match_here(&pattern[1..], &text[1..])
-            } else {
-                false
-            }
-        }
-        RE::NegCharClass(class) => {
-            if !text.is_empty() && !class.contains(&text.chars().next().unwrap()) {
-                match_here(&pattern[1..], &text[1..])
-            } else {
-                false
-            }
-        }
-        RE::Digit => {
-            if !text.is_empty() && text.chars().next().unwrap().is_ascii_digit() {
-                match_here(&pattern[1..], &text[1..])
-            } else {
-                false
-            }
-        }
-        RE::Word => {
-            if !text.is_empty() && text.chars().next().unwrap().is_alphanumeric() {
-                match_here(&pattern[1..], &text[1..])
-            } else {
-                false
-            }
-        }
-        RE::Alternation(left, right) => {
-            match_pattern(&[left.as_ref().clone()], text) || match_pattern(&[right.as_ref().clone()], text)
-        }
-        RE::Group(group_pattern) => match_pattern(group_pattern, text),
-        _ => false,
-    }
-}
-
-fn match_question(re: &RE, pattern: &[RE], text: &str) -> bool {
-    let mut text_slice = text;
-    loop {
-        if match_here(pattern, text_slice) {
-            return true;
-        }
-        if text_slice.is_empty() || !matches_char(re, text_slice.chars().next().unwrap()) {
-            break;
-        }
-        text_slice = &text_slice[1..];
-    }
-    false
-}
-
-fn match_plus(re: &RE, pattern: &[RE], text: &str) -> bool {
-    let mut text_slice = text;
-    // First, we must match at least one occurrence of the character
-    if !text_slice.is_empty() && matches_char(re, text_slice.chars().next().unwrap()) {
-        text_slice = &text_slice[1..];
-    } else {
-        return false;
-    }
-
-    // Now, match zero or more occurrences (like a '?')
-    loop {
-        if match_here(pattern, text_slice) {
-            return true;
-        }
-        if text_slice.is_empty() || !matches_char(re, text_slice.chars().next().unwrap()) {
-            break;
-        }
-        text_slice = &text_slice[1..];
-    }
-    false
-}
-
-fn matches_char(re: &RE, c: char) -> bool {
-    match re {
-        RE::Char(ch) => *ch == c,
-        RE::Dot => true,
-        RE::Digit => c.is_ascii_digit(),
-        RE::Word => c.is_alphanumeric(),
-        RE::CharClass(class) => class.contains(&c),
-        RE::NegCharClass(class) => !class.contains(&c),
-        _ => false,
-    }
-}
-
 // Usage: echo <input_text> | your_program.sh -E <pattern>
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -323,12 +375,12 @@ fn main() {
     let pattern_str = &args[2];
     let mut input = String::new();
     std::io::stdin().read_line(&mut input).expect("Failed to read input");
-    let input = input.trim(); // Remove newline character
+    let input = input.trim();
 
-    let pattern = parse_pattern(pattern_str);
-    if match_pattern(&pattern, input) {
-        process::exit(0); // Pattern matches
+    let mut engine = RegexEngine::new(pattern_str);
+    if engine.match_text(input) {
+        process::exit(0);
     } else {
-        process::exit(1); // Pattern does not match
+        process::exit(1);
     }
 }
