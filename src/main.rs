@@ -151,12 +151,14 @@ impl RegexEngine {
             }
             RE::Alternation(left, right) => {
                 let original_captures = self.captures.clone();
+                let original_group_index = self.group_index;
     
                 if self.match_pattern(&left.clone(), text) {
                     return true;
                 }
     
                 self.captures = original_captures;
+                self.group_index = original_group_index;
     
                 self.match_pattern(&right.clone(), text)
             }
