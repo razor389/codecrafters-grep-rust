@@ -145,7 +145,19 @@ impl RegexEngine {
                 false
             }
             RE::Alternation(left, right) => {
-                self.match_pattern(&[left.as_ref().clone()], text) || self.match_pattern(&[right.as_ref().clone()], text)
+                // Clone captures so we can backtrack if needed
+                let original_captures = self.captures.clone();
+    
+                // Try the left side of the alternation as a group
+                if self.match_pattern(&[RE::Group(vec![left.as_ref().clone()])], text) {
+                    return true;
+                }
+    
+                // Restore captures if the left side fails
+                self.captures = original_captures;
+    
+                // Try the right side of the alternation as a group
+                self.match_pattern(&[RE::Group(vec![right.as_ref().clone()])], text)
             }
             _ => false,
         }
@@ -338,8 +350,9 @@ fn parse_alternation(chars: &[char], start: usize) -> (RE, usize) {
         i += 1; // Move past '|'
         let right_side = parse_sequence(chars, &mut i);
         if i < chars.len() && chars[i] == ')' {
+            // Wrap the alternation in a group directly
             return (
-                RE::Alternation(Box::new(RE::Group(left_side)), Box::new(RE::Group(right_side))),
+                RE::Group(vec![RE::Alternation(Box::new(RE::Group(left_side)), Box::new(RE::Group(right_side)))]),
                 i,
             );
         } else {
@@ -351,6 +364,7 @@ fn parse_alternation(chars: &[char], start: usize) -> (RE, usize) {
         panic!("Unmatched parenthesis or invalid alternation syntax");
     }
 }
+
 
 fn parse_char_class(chars: &[char], start: usize) -> (Vec<char>, usize) {
     let mut class = Vec::new();
