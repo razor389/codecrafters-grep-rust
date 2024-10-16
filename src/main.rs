@@ -22,17 +22,15 @@ enum RE {
 struct RegexEngine {
     pattern: Vec<RE>,
     captures: HashMap<usize, String>, // Captured groups stored by their index
-    group_index: usize,
 }
 
 impl RegexEngine {
     fn new(pattern: &str) -> Self {
         let parsed_pattern = parse_pattern(pattern);
-        println!("pattern: {:?}", parsed_pattern);
+        //println!("pattern: {:?}", parsed_pattern);
         Self {
             pattern: parsed_pattern,
             captures: HashMap::new(),
-            group_index: 0,
         }
     }
 
@@ -40,16 +38,16 @@ impl RegexEngine {
         // Clone the pattern so we only borrow `self` mutably during the actual matching phase
         let pattern = self.pattern.clone();
         self.captures.clear();
-        self.match_pattern(&pattern, text)
-    }    
+        self.match_pattern(&pattern, text, 0)
+    }
 
-    fn match_pattern(&mut self, pattern: &[RE], text: &str) -> bool {
+    fn match_pattern(&mut self, pattern: &[RE], text: &str, mut local_group_index: usize) -> bool {
         if let Some(RE::Start) = pattern.get(0) {
-            self.match_here(&pattern[1..], text)
+            self.match_here(&pattern[1..], text, local_group_index)
         } else {
             let mut text_slice = text;
             loop {
-                if self.match_here(pattern, text_slice) {
+                if self.match_here(pattern, text_slice, local_group_index) {
                     return true;
                 }
                 if text_slice.is_empty() {
@@ -61,64 +59,61 @@ impl RegexEngine {
         }
     }
 
-    fn match_here(&mut self, pattern: &[RE], text: &str) -> bool {
+    fn match_here(&mut self, pattern: &[RE], text: &str, mut local_group_index: usize) -> bool {
         if pattern.is_empty() {
             return true;
         }
-    
+
         match &pattern[0] {
             RE::End => text.is_empty(),
             RE::Char(c) => {
                 if !text.is_empty() && text.chars().next() == Some(*c) {
-                    self.match_here(&pattern[1..], &text[1..])
+                    self.match_here(&pattern[1..], &text[1..], local_group_index)
                 } else {
                     false
                 }
             }
             RE::Dot => {
                 if !text.is_empty() {
-                    self.match_here(&pattern[1..], &text[1..])
+                    self.match_here(&pattern[1..], &text[1..], local_group_index)
                 } else {
                     false
                 }
             }
-            RE::Question(boxed_re) => self.match_question(&**boxed_re, &pattern[1..], text),
-            RE::Plus(boxed_re) => self.match_plus(&**boxed_re, &pattern[1..], text),
+            RE::Question(boxed_re) => self.match_question(&**boxed_re, &pattern[1..], text, local_group_index),
+            RE::Plus(boxed_re) => self.match_plus(&**boxed_re, &pattern[1..], text, local_group_index),
             RE::CharClass(class) => {
                 if !text.is_empty() && class.contains(&text.chars().next().unwrap()) {
-                    self.match_here(&pattern[1..], &text[1..])
+                    self.match_here(&pattern[1..], &text[1..], local_group_index)
                 } else {
                     false
                 }
             }
             RE::NegCharClass(class) => {
                 if !text.is_empty() && !class.contains(&text.chars().next().unwrap()) {
-                    self.match_here(&pattern[1..], &text[1..])
+                    self.match_here(&pattern[1..], &text[1..], local_group_index)
                 } else {
                     false
                 }
             }
             RE::Digit => {
                 if !text.is_empty() && text.chars().next().unwrap().is_ascii_digit() {
-                    self.match_here(&pattern[1..], &text[1..])
+                    self.match_here(&pattern[1..], &text[1..], local_group_index)
                 } else {
                     false
                 }
             }
             RE::Word => {
                 if !text.is_empty() && text.chars().next().unwrap().is_alphanumeric() {
-                    self.match_here(&pattern[1..], &text[1..])
+                    self.match_here(&pattern[1..], &text[1..], local_group_index)
                 } else {
                     false
                 }
             }
             RE::Backreference(group_index) => {
-                //println!("trying to access backreference: {}", group_index);
-                //println!("available captures: {:#?}", self.captures);
                 if let Some(captured) = self.captures.get(group_index) {
-                    //println!("backreference captured: {}", captured);
                     if text.starts_with(captured) {
-                        self.match_here(&pattern[1..], &text[captured.len()..])
+                        self.match_here(&pattern[1..], &text[captured.len()..], local_group_index)
                     } else {
                         false
                     }
@@ -127,72 +122,78 @@ impl RegexEngine {
                 }
             }
             RE::Group(group_pattern) => {
-                let original_group_index = self.group_index;
-                let group_index = self.group_index + 1;
-                self.group_index = group_index;
+                let original_captures = self.captures.clone();
 
                 for len in 0..=text.len() {
                     let slice = &text[..len];
-                    let original_captures = self.captures.clone();
-    
-                    if self.match_pattern(group_pattern, slice) {
-                        
-                        self.captures.insert(group_index, slice.to_string());
-    
-                        if self.match_here(&pattern[1..], &text[len..]) {
+
+                    if self.match_pattern(group_pattern, slice, local_group_index) {
+                        // Capture the group after a successful match
+                        local_group_index += 1;
+                        self.captures.insert(local_group_index, slice.to_string());
+
+                        if self.match_here(&pattern[1..], &text[len..], local_group_index) {
                             return true;
                         }
-    
-                        self.captures = original_captures;
+
+                        // Restore captures if match fails
+                        self.captures = original_captures.clone();
                     }
                 }
-                // Restore the group_index if we exit the loop without a match
-                self.group_index = original_group_index;
+
                 false
             }
             RE::Alternation(left, right) => {
                 let original_captures = self.captures.clone();
-                let original_group_index = self.group_index;
-    
-                if self.match_pattern(&left.clone(), text) {
+                let original_group_index = local_group_index;
+
+                // Try matching the left side of the alternation
+                if self.match_pattern(&left, text, local_group_index) {
                     return true;
                 }
-    
+
+                // Restore state if the left branch fails
+                self.captures = original_captures.clone();
+                local_group_index = original_group_index;
+
+                // Try matching the right side of the alternation
+                if self.match_pattern(&right, text, local_group_index) {
+                    return true;
+                }
+
+                // Restore state if both branches fail
                 self.captures = original_captures;
-                self.group_index = original_group_index;
-    
-                self.match_pattern(&right.clone(), text)
+                local_group_index = original_group_index;
+
+                false
             }
             _ => false,
         }
-    }    
+    }
 
-    fn match_question(&mut self, re: &RE, pattern: &[RE], text: &str) -> bool {
-        // First, try to match the rest of the pattern without consuming any character (zero occurrences)
-        if self.match_here(pattern, text) {
+    fn match_question(&mut self, re: &RE, pattern: &[RE], text: &str, local_group_index: usize) -> bool {
+        if self.match_here(pattern, text, local_group_index) {
             return true;
         }
-    
-        // Then, try to match one occurrence of `re` if possible
+
         if !text.is_empty() && self.matches_char(re, text.chars().next().unwrap()) {
-            self.match_here(pattern, &text[1..])
+            self.match_here(pattern, &text[1..], local_group_index)
         } else {
             false
         }
-    }    
+    }
 
-    fn match_plus(&mut self, re: &RE, pattern: &[RE], text: &str) -> bool {
+    fn match_plus(&mut self, re: &RE, pattern: &[RE], text: &str, mut local_group_index: usize) -> bool {
         let mut text_slice = text;
-        // First, we must match at least one occurrence of the character
+
         if !text_slice.is_empty() && self.matches_char(re, text_slice.chars().next().unwrap()) {
             text_slice = &text_slice[1..];
         } else {
             return false;
         }
-    
-        // Now, match zero or more occurrences of `re`
+
         loop {
-            if self.match_here(pattern, text_slice) {
+            if self.match_here(pattern, text_slice, local_group_index) {
                 return true;
             }
             if text_slice.is_empty() || !self.matches_char(re, text_slice.chars().next().unwrap()) {
@@ -202,7 +203,6 @@ impl RegexEngine {
         }
         false
     }
-    
 
     fn matches_char(&self, re: &RE, c: char) -> bool {
         match re {
