@@ -126,6 +126,7 @@ impl RegexEngine {
                 }
             }
             RE::Group(group_pattern) => {
+                println!("captures: {:#?}", self.captures.clone());
                 self.group_index += 1;
                 for len in 0..=text.len() {
                     let slice = &text[..len];
