@@ -22,22 +22,24 @@ enum RE {
 struct RegexEngine {
     pattern: Vec<RE>,
     captures: HashMap<usize, String>, // Captured groups stored by their index
+    group_index: usize,
 }
 
 impl RegexEngine {
     fn new(pattern: &str) -> Self {
         let parsed_pattern = parse_pattern(pattern);
-        //println!("pattern: {:?}", parsed_pattern);
+        println!("pattern: {:?}", parsed_pattern);
         Self {
             pattern: parsed_pattern,
             captures: HashMap::new(),
+            group_index: 0,
         }
     }
 
     fn match_text(&mut self, text: &str) -> bool {
-        // Clone the pattern so we only borrow `self` mutably during the actual matching phase
         let pattern = self.pattern.clone();
         self.captures.clear();
+        self.group_index = 0; // Reset group index for each new match attempt
         self.match_pattern(&pattern, text, 0)
     }
 
@@ -122,24 +124,32 @@ impl RegexEngine {
                 }
             }
             RE::Group(group_pattern) => {
+                // Save the current state of group_index and captures
                 let original_captures = self.captures.clone();
+                let original_group_index = local_group_index;
 
+                // Increment local_group_index for this group
+                local_group_index += 1;
+                let group_index = local_group_index;
+
+                // Attempt to match the group at different lengths
                 for len in 0..=text.len() {
                     let slice = &text[..len];
+                    self.captures = original_captures.clone(); // Restore captures before each attempt
 
                     if self.match_pattern(group_pattern, slice, local_group_index) {
-                        // Capture the group after a successful match
-                        local_group_index += 1;
-                        self.captures.insert(local_group_index, slice.to_string());
+                        // Only assign the capture if the group matches
+                        self.captures.insert(group_index, slice.to_string());
 
                         if self.match_here(&pattern[1..], &text[len..], local_group_index) {
                             return true;
                         }
-
-                        // Restore captures if match fails
-                        self.captures = original_captures.clone();
                     }
                 }
+
+                // Restore state if no match is found
+                self.captures = original_captures;
+                local_group_index = original_group_index;
 
                 false
             }
@@ -203,6 +213,7 @@ impl RegexEngine {
         }
         false
     }
+    
 
     fn matches_char(&self, re: &RE, c: char) -> bool {
         match re {
