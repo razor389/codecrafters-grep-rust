@@ -152,27 +152,29 @@ impl RegexEngine {
     }
 
     fn match_question(&mut self, re: &RE, pattern: &[RE], text: &str) -> bool {
-        let mut text_slice = text;
-        loop {
-            if self.match_here(pattern, text_slice) {
-                return true;
-            }
-            if text_slice.is_empty() || !self.matches_char(re, text_slice.chars().next().unwrap()) {
-                break;
-            }
-            text_slice = &text_slice[1..];
+        // First, try to match the rest of the pattern without consuming any character (zero occurrences)
+        if self.match_here(pattern, text) {
+            return true;
         }
-        false
-    }
+    
+        // Then, try to match one occurrence of `re` if possible
+        if !text.is_empty() && self.matches_char(re, text.chars().next().unwrap()) {
+            self.match_here(pattern, &text[1..])
+        } else {
+            false
+        }
+    }    
 
     fn match_plus(&mut self, re: &RE, pattern: &[RE], text: &str) -> bool {
         let mut text_slice = text;
+        // First, we must match at least one occurrence of the character
         if !text_slice.is_empty() && self.matches_char(re, text_slice.chars().next().unwrap()) {
             text_slice = &text_slice[1..];
         } else {
             return false;
         }
-
+    
+        // Now, match zero or more occurrences of `re`
         loop {
             if self.match_here(pattern, text_slice) {
                 return true;
@@ -184,6 +186,7 @@ impl RegexEngine {
         }
         false
     }
+    
 
     fn matches_char(&self, re: &RE, c: char) -> bool {
         match re {
