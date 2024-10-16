@@ -142,6 +142,7 @@ impl RegexEngine {
                         }
     
                         self.captures = original_captures;
+                        self.group_index -= 1;
                     }
                 }
                 false
