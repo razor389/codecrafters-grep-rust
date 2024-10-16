@@ -22,6 +22,7 @@ enum RE {
 struct RegexEngine {
     pattern: Vec<RE>,
     captures: HashMap<usize, String>, // Captured groups stored by their index
+    group_index: usize,
 }
 
 impl RegexEngine {
@@ -30,6 +31,7 @@ impl RegexEngine {
         Self {
             pattern: parsed_pattern,
             captures: HashMap::new(),
+            group_index: 0,
         }
     }
 
@@ -124,14 +126,14 @@ impl RegexEngine {
                 }
             }
             RE::Group(group_pattern) => {
-                let group_index = self.captures.len() + 1;
+                self.group_index += 1;
                 for len in 0..=text.len() {
                     let slice = &text[..len];
                     let original_captures = self.captures.clone();
     
                     if self.match_pattern(group_pattern, slice) {
                         
-                        self.captures.insert(group_index, slice.to_string());
+                        self.captures.insert(self.group_index, slice.to_string());
     
                         if self.match_here(&pattern[1..], &text[len..]) {
                             return true;
