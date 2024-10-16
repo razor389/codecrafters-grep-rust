@@ -121,17 +121,28 @@ impl RegexEngine {
                 }
             }
             RE::Group(group_pattern) => {
-                let start_pos = text.len();
-                if self.match_pattern(group_pattern, text) {
-                    let end_pos = text.len();
-                    let captured_str = &text[..start_pos - end_pos];
-                    // Find the group index for this group
-                    let group_index = self.captures.len() + 1;
-                    self.captures.insert(group_index, captured_str.to_string());
-                    self.match_here(&pattern[1..], &text[captured_str.len()..])
-                } else {
-                    false
+                // Attempt to match the group and capture the substring
+                for len in 0..=text.len() {
+                    // Take a slice of the text up to the current length
+                    let slice = &text[..len];
+                    let original_captures = self.captures.clone(); // Save current state of captures
+    
+                    if self.match_pattern(group_pattern, slice) {
+                        // Successfully matched the group; store the capture
+                        let group_index = self.captures.len() + 1;
+                        self.captures.insert(group_index, slice.to_string());
+    
+                        // Try to match the rest of the pattern with the remaining text
+                        if self.match_here(&pattern[1..], &text[len..]) {
+                            return true;
+                        }
+    
+                        // Restore the captures if the rest of the pattern does not match
+                        self.captures = original_captures;
+                    }
                 }
+    
+                false
             }
             RE::Alternation(left, right) => {
                 self.match_pattern(&[left.as_ref().clone()], text) || self.match_pattern(&[right.as_ref().clone()], text)
