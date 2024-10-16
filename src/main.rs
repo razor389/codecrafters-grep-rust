@@ -112,7 +112,6 @@ impl RegexEngine {
             RE::Backreference(group_index) => {
                 if let Some(captured) = self.captures.get(group_index) {
                     if text.starts_with(captured) {
-                        println!("backreference: {}", captured);
                         self.match_here(&pattern[1..], &text[captured.len()..])
                     } else {
                         false
@@ -127,6 +126,8 @@ impl RegexEngine {
                     let original_captures = self.captures.clone();
     
                     if self.match_pattern(group_pattern, slice) {
+                        println!("matched pattern: {:#?}", group_pattern);
+                        println!("to slice: {}", slice);
                         let group_index = self.captures.len() + 1;
                         self.captures.insert(group_index, slice.to_string());
     
