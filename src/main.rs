@@ -179,22 +179,29 @@ impl<'a> MatchContext<'a> {
             }
             RE::Group(group_pattern) => {
                 let original_captures = self.captures.clone();
-                let group_index = self.group_index + 1;
+                let original_group_index = self.group_index;
+
+                self.group_index += 1;
+                let group_index = self.group_index;
 
                 for len in 0..=self.text.len() {
                     let slice = &self.text[..len];
                     let mut local_context = self.clone();
-                    local_context.group_index = group_index;
+                    local_context.text = slice;
 
                     if local_context.match_pattern(group_pattern) {
                         local_context.captures.insert(group_index, slice.to_string());
+
+                        local_context.text = &self.text[len..];
                         if local_context.match_here(&pattern[1..]) {
                             *self = local_context;
                             return true;
                         }
-                        local_context.captures = original_captures.clone();
                     }
                 }
+
+                self.captures = original_captures;
+                self.group_index = original_group_index;
                 false
             }
             RE::Alternation(left, right) => {
