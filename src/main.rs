@@ -124,12 +124,13 @@ impl RegexEngine {
                 }
             }
             RE::Group(group_pattern) => {
+                let group_index = self.captures.len() + 1;
                 for len in 0..=text.len() {
                     let slice = &text[..len];
                     let original_captures = self.captures.clone();
     
                     if self.match_pattern(group_pattern, slice) {
-                        let group_index = self.captures.len() + 1;
+                        
                         self.captures.insert(group_index, slice.to_string());
     
                         if self.match_here(&pattern[1..], &text[len..]) {
