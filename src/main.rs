@@ -112,6 +112,7 @@ impl RegexEngine {
             RE::Backreference(group_index) => {
                 if let Some(captured) = self.captures.get(group_index) {
                     if text.starts_with(captured) {
+                        println!("backreference: {}", captured);
                         self.match_here(&pattern[1..], &text[captured.len()..])
                     } else {
                         false
