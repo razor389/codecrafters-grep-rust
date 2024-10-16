@@ -28,6 +28,7 @@ struct RegexEngine {
 impl RegexEngine {
     fn new(pattern: &str) -> Self {
         let parsed_pattern = parse_pattern(pattern);
+        println!("pattern: {:?}", parsed_pattern);
         Self {
             pattern: parsed_pattern,
             captures: HashMap::new(),
@@ -112,10 +113,10 @@ impl RegexEngine {
                 }
             }
             RE::Backreference(group_index) => {
-                println!("trying to access backreference: {}", group_index);
-                println!("available captures: {:#?}", self.captures);
+                //println!("trying to access backreference: {}", group_index);
+                //println!("available captures: {:#?}", self.captures);
                 if let Some(captured) = self.captures.get(group_index) {
-                    println!("backreference captured: {}", captured);
+                    //println!("backreference captured: {}", captured);
                     if text.starts_with(captured) {
                         self.match_here(&pattern[1..], &text[captured.len()..])
                     } else {
