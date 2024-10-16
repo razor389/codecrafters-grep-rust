@@ -126,25 +126,27 @@ impl RegexEngine {
                 }
             }
             RE::Group(group_pattern) => {
-                
-                self.group_index += 1;
+                let original_group_index = self.group_index;
+                let group_index = self.group_index + 1;
+                self.group_index = group_index;
+
                 for len in 0..=text.len() {
                     let slice = &text[..len];
                     let original_captures = self.captures.clone();
     
                     if self.match_pattern(group_pattern, slice) {
                         
-                        self.captures.insert(self.group_index, slice.to_string());
-                        println!("captures: {:#?}", self.captures.clone());
+                        self.captures.insert(group_index, slice.to_string());
     
                         if self.match_here(&pattern[1..], &text[len..]) {
                             return true;
                         }
     
                         self.captures = original_captures;
-                        self.group_index -= 1;
                     }
                 }
+                // Restore the group_index if we exit the loop without a match
+                self.group_index = original_group_index;
                 false
             }
             RE::Alternation(left, right) => {
