@@ -125,9 +125,8 @@ impl RegexEngine {
                 }
             }
             RE::Group(group_pattern) => {
-                // Save the current state of group_index and captures
+                let original_captures = local_captures.clone();
                 let original_group_index = local_group_index;
-                let mut new_captures = local_captures.clone();
 
                 // Increment local_group_index for this group
                 local_group_index += 1;
@@ -135,14 +134,17 @@ impl RegexEngine {
 
                 for len in 0..=text.len() {
                     let slice = &text[..len];
-                    new_captures = local_captures.clone(); // Restore captures before each attempt
+
+                    // Reset captures for each attempt
+                    let mut new_captures = original_captures.clone();
 
                     if self.match_pattern(group_pattern, slice, local_group_index, &mut new_captures) {
-                        // Only assign the capture if the group matches
+                        // Capture the group only after a successful match
                         new_captures.insert(group_index, slice.to_string());
 
                         if self.match_here(&pattern[1..], &text[len..], local_group_index, &mut new_captures) {
-                            *local_captures = new_captures; // Update the local captures after a successful match
+                            // Update the local captures after a successful match
+                            *local_captures = new_captures;
                             return true;
                         }
                     }
