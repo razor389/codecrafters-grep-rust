@@ -110,7 +110,9 @@ impl RegexEngine {
                 }
             }
             RE::Backreference(group_index) => {
+                println!("trying to access backreference: {}", group_index);
                 if let Some(captured) = self.captures.get(group_index) {
+                    println!("backreference captured: {}", captured);
                     if text.starts_with(captured) {
                         self.match_here(&pattern[1..], &text[captured.len()..])
                     } else {
@@ -275,7 +277,7 @@ fn parse_pattern(pattern: &str) -> Vec<RE> {
         }
         i += 1;
     }
-    println!("pattern to match: {:#?}", result);
+    //println!("pattern to match: {:#?}", result);
     result
 }
 
