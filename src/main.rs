@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::env;
 use std::process;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum RE {
     Char(char),                 // A literal character
     Question(Box<RE>),          // A character or regex type followed by '?'
@@ -242,7 +242,18 @@ fn parse_pattern(pattern: &str) -> Vec<RE> {
                 }
             }
             '(' => {
-                let (group, end_idx) = parse_alternation(&chars, i + 1);
+                // Check if the previous element is RE::Start
+                let prepend_start = result.last() == Some(&RE::Start);
+
+                let (mut group, end_idx) = parse_alternation(&chars, i + 1);
+                // If we should prepend RE::Start, do so
+                if prepend_start{
+                    if let RE::Group(mut group_inner) = group{
+                        group_inner.insert(0, RE::Start);
+                        group = RE::Group(group_inner);
+                    }
+                }
+                
                 result.push(group);
                 i = end_idx;
             }
