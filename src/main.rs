@@ -1,3 +1,4 @@
+use std::clone;
 use std::collections::HashMap;
 use std::env;
 use std::process;
@@ -19,38 +20,36 @@ enum RE {
     Backreference(usize),       // A backreference to a previously captured group, e.g., \1
 }
 
-struct RegexEngine {
-    pattern: Vec<RE>,
-    captures: HashMap<usize, String>, // Captured groups stored by their index
-    //group_index: usize,
+#[derive(Clone)]
+struct MatchContext<'a> {
+    text: &'a str,
+    captures: HashMap<usize, String>,
+    group_index: usize,
 }
 
-impl RegexEngine {
-    fn new(pattern: &str) -> Self {
-        let parsed_pattern = parse_pattern(pattern);
-        //println!("pattern: {:?}", parsed_pattern);
+impl<'a> MatchContext<'a> {
+    fn new(text: &'a str) -> Self {
         Self {
-            pattern: parsed_pattern,
+            text,
             captures: HashMap::new(),
+            group_index: 0,
         }
     }
 
-    fn match_text(&mut self, text: &str) -> bool {
-        let pattern = self.pattern.clone();
-        self.captures.clear();
-        
-        self.match_pattern(&pattern, text, 0, &mut HashMap::new())
-    }
-
-    fn match_pattern(&mut self, pattern: &[RE], text: &str, mut local_group_index: usize, local_captures: &mut HashMap<usize, String>) -> bool {
+    fn match_pattern(&mut self, pattern: &[RE]) -> bool {
         if let Some(RE::Start) = pattern.get(0) {
-            self.match_here(&pattern[1..], text, local_group_index, local_captures)
+            self.match_here(&pattern[1..])
         } else {
-            let mut text_slice = text;
+            let mut text_slice = self.text;
             loop {
-                if self.match_here(pattern, text_slice, local_group_index, local_captures) {
+                let mut local_context = self.clone();
+                local_context.text = text_slice;
+
+                if local_context.match_here(pattern) {
+                    *self = local_context; // Update self with successful match state
                     return true;
                 }
+
                 if text_slice.is_empty() {
                     break;
                 }
@@ -60,157 +59,159 @@ impl RegexEngine {
         }
     }
 
-    fn match_here(&mut self, pattern: &[RE], text: &str, mut local_group_index: usize, local_captures: &mut HashMap<usize, String>) -> bool {
+    fn match_here(&mut self, pattern: &[RE]) -> bool {
         if pattern.is_empty() {
             return true;
         }
 
         match &pattern[0] {
-            RE::End => text.is_empty(),
+            RE::End => self.text.is_empty(),
             RE::Char(c) => {
-                if !text.is_empty() && text.chars().next() == Some(*c) {
-                    self.match_here(&pattern[1..], &text[1..], local_group_index, local_captures)
-                } else {
-                    false
+                if !self.text.is_empty() && self.text.chars().next() == Some(*c) {
+                    let mut local_context = self.clone();
+                    local_context.text = &self.text[1..];
+                    if local_context.match_here(&pattern[1..]) {
+                        *self = local_context; // Update self with successful match state
+                        return true;
+                    }
                 }
+                false
             }
             RE::Dot => {
-                if !text.is_empty() {
-                    self.match_here(&pattern[1..], &text[1..], local_group_index, local_captures)
-                } else {
-                    false
+                if !self.text.is_empty() {
+                    let mut local_context = self.clone();
+                    local_context.text = &self.text[1..];
+                    if local_context.match_here(&pattern[1..]) {
+                        *self = local_context;
+                        return true;
+                    }
                 }
+                false
             }
-            RE::Question(boxed_re) => self.match_question(&**boxed_re, &pattern[1..], text, local_group_index, local_captures),
-            RE::Plus(boxed_re) => self.match_plus(&**boxed_re, &pattern[1..], text, local_group_index, local_captures),
-            RE::CharClass(class) => {
-                if !text.is_empty() && class.contains(&text.chars().next().unwrap()) {
-                    self.match_here(&pattern[1..], &text[1..], local_group_index, local_captures)
-                } else {
-                    false
+            RE::Question(boxed_re) => {
+                if self.match_here(&pattern[1..]) {
+                    return true;
                 }
+                let mut local_context = self.clone();
+                if !self.text.is_empty() && local_context.matches_char(boxed_re, self.text.chars().next().unwrap()) {
+                    local_context.text = &self.text[1..];
+                    if local_context.match_here(&pattern[1..]) {
+                        *self = local_context;
+                        return true;
+                    }
+                }
+                false
+            }
+            RE::Plus(boxed_re) => {
+                let mut local_context = self.clone();
+                if !self.text.is_empty() && local_context.matches_char(boxed_re, self.text.chars().next().unwrap()) {
+                    local_context.text = &self.text[1..];
+                    loop {
+                        if local_context.match_here(&pattern[1..]) {
+                            *self = local_context;
+                            return true;
+                        }
+                        if local_context.text.is_empty() || !local_context.matches_char(boxed_re, local_context.text.chars().next().unwrap()) {
+                            break;
+                        }
+                        local_context.text = &local_context.text[1..];
+                    }
+                }
+                false
+            }
+            RE::CharClass(class) => {
+                if !self.text.is_empty() && class.contains(&self.text.chars().next().unwrap()) {
+                    let mut local_context = self.clone();
+                    local_context.text = &self.text[1..];
+                    if local_context.match_here(&pattern[1..]) {
+                        *self = local_context;
+                        return true;
+                    }
+                }
+                false
             }
             RE::NegCharClass(class) => {
-                if !text.is_empty() && !class.contains(&text.chars().next().unwrap()) {
-                    self.match_here(&pattern[1..], &text[1..], local_group_index, local_captures)
-                } else {
-                    false
+                if !self.text.is_empty() && !class.contains(&self.text.chars().next().unwrap()) {
+                    let mut local_context = self.clone();
+                    local_context.text = &self.text[1..];
+                    if local_context.match_here(&pattern[1..]) {
+                        *self = local_context;
+                        return true;
+                    }
                 }
+                false
             }
             RE::Digit => {
-                if !text.is_empty() && text.chars().next().unwrap().is_ascii_digit() {
-                    self.match_here(&pattern[1..], &text[1..], local_group_index, local_captures)
-                } else {
-                    false
+                if !self.text.is_empty() && self.text.chars().next().unwrap().is_ascii_digit() {
+                    let mut local_context = self.clone();
+                    local_context.text = &self.text[1..];
+                    if local_context.match_here(&pattern[1..]) {
+                        *self = local_context;
+                        return true;
+                    }
                 }
+                false
             }
             RE::Word => {
-                if !text.is_empty() && text.chars().next().unwrap().is_alphanumeric() {
-                    self.match_here(&pattern[1..], &text[1..], local_group_index, local_captures)
-                } else {
-                    false
+                if !self.text.is_empty() && self.text.chars().next().unwrap().is_alphanumeric() {
+                    let mut local_context = self.clone();
+                    local_context.text = &self.text[1..];
+                    if local_context.match_here(&pattern[1..]) {
+                        *self = local_context;
+                        return true;
+                    }
                 }
+                false
             }
             RE::Backreference(group_index) => {
-                println!("attemptin to capture backrefs: {}", group_index);
-                println!("available captured groups: {:#?}", local_captures);
-                if let Some(captured) = local_captures.get(group_index) {
-                    if text.starts_with(captured) {
-                        self.match_here(&pattern[1..], &text[captured.len()..], local_group_index, local_captures)
-                    } else {
-                        false
-                    }
-                } else {
-                    false // No capture for this group yet
-                }
-            }
-            RE::Group(group_pattern) => {
-                let original_captures = local_captures.clone();
-                let original_group_index = local_group_index;
-
-                // Increment local_group_index for this group
-                local_group_index += 1;
-                let group_index = local_group_index;
-
-                for len in 0..=text.len() {
-                    let slice = &text[..len];
-
-                    // Reset captures for each attempt
-                    let mut new_captures = original_captures.clone();
-
-                    if self.match_pattern(group_pattern, slice, local_group_index, &mut new_captures) {
-                        // Capture the group only after a successful match
-                        new_captures.insert(group_index, slice.to_string());
-
-                        if self.match_here(&pattern[1..], &text[len..], local_group_index, &mut new_captures) {
-                            // Update the local captures after a successful match
-                            *local_captures = new_captures;
+                if let Some(captured) = self.captures.get(group_index) {
+                    if self.text.starts_with(captured) {
+                        let mut local_context = self.clone();
+                        local_context.text = &self.text[captured.len()..];
+                        if local_context.match_here(&pattern[1..]) {
+                            *self = local_context;
                             return true;
                         }
                     }
                 }
+                false
+            }
+            RE::Group(group_pattern) => {
+                let original_captures = self.captures.clone();
+                let group_index = self.group_index + 1;
 
+                for len in 0..=self.text.len() {
+                    let slice = &self.text[..len];
+                    let mut local_context = self.clone();
+                    local_context.group_index = group_index;
+
+                    if local_context.match_pattern(group_pattern) {
+                        local_context.captures.insert(group_index, slice.to_string());
+                        if local_context.match_here(&pattern[1..]) {
+                            *self = local_context;
+                            return true;
+                        }
+                        local_context.captures = original_captures.clone();
+                    }
+                }
                 false
             }
             RE::Alternation(left, right) => {
-                let original_captures = local_captures.clone();
-                let original_group_index = local_group_index;
-
-                // Try matching the left side of the alternation
-                if self.match_pattern(&left, text, local_group_index, local_captures) {
+                let mut local_context = self.clone();
+                if local_context.match_pattern(left) {
+                    *self = local_context;
                     return true;
                 }
 
-                // Restore state if the left branch fails
-                *local_captures = original_captures.clone();
-                local_group_index = original_group_index;
-
-                // Try matching the right side of the alternation
-                if self.match_pattern(&right, text, local_group_index, local_captures) {
+                local_context = self.clone();
+                if local_context.match_pattern(right) {
+                    *self = local_context;
                     return true;
                 }
-
-                // Restore state if both branches fail
-                *local_captures = original_captures;
-                local_group_index = original_group_index;
-
                 false
             }
-            _ => false,
+            _=> false,
         }
-    }
-
-    fn match_question(&mut self, re: &RE, pattern: &[RE], text: &str, local_group_index: usize, local_captures: &mut HashMap<usize, String>) -> bool {
-        if self.match_here(pattern, text, local_group_index, local_captures) {
-            return true;
-        }
-
-        if !text.is_empty() && self.matches_char(re, text.chars().next().unwrap()) {
-            self.match_here(pattern, &text[1..], local_group_index, local_captures)
-        } else {
-            false
-        }
-    }
-
-    fn match_plus(&mut self, re: &RE, pattern: &[RE], text: &str, local_group_index: usize, local_captures: &mut HashMap<usize, String>) -> bool {
-        let mut text_slice = text;
-
-        if !text_slice.is_empty() && self.matches_char(re, text_slice.chars().next().unwrap()) {
-            text_slice = &text_slice[1..];
-        } else {
-            return false;
-        }
-
-        loop {
-            if self.match_here(pattern, text_slice, local_group_index, local_captures) {
-                return true;
-            }
-            if text_slice.is_empty() || !self.matches_char(re, text_slice.chars().next().unwrap()) {
-                break;
-            }
-            text_slice = &text_slice[1..];
-        }
-        false
     }
 
     fn matches_char(&self, re: &RE, c: char) -> bool {
@@ -223,6 +224,24 @@ impl RegexEngine {
             RE::NegCharClass(class) => !class.contains(&c),
             _ => false,
         }
+    }
+}
+
+struct RegexEngine {
+    pattern: Vec<RE>,
+}
+
+impl RegexEngine {
+    fn new(pattern: &str) -> Self {
+        let parsed_pattern = parse_pattern(pattern);
+        Self {
+            pattern: parsed_pattern,
+        }
+    }
+
+    fn match_text(&self, text: &str) -> bool {
+        let mut context = MatchContext::new(text);
+        context.match_pattern(&self.pattern)
     }
 }
 
