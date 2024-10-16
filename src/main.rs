@@ -113,6 +113,8 @@ impl RegexEngine {
                 }
             }
             RE::Backreference(group_index) => {
+                println!("trying to capture: {}", group_index);
+                println!("available captures: {:#?}", self.captures);
                 if let Some(captured) = self.captures.get(group_index) {
                     if text.starts_with(captured) {
                         self.match_here(&pattern[1..], &text[captured.len()..], local_group_index)
