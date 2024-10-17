@@ -1,4 +1,3 @@
-use std::clone;
 use std::collections::HashMap;
 use std::env;
 use std::process;
@@ -456,7 +455,7 @@ fn main() {
     std::io::stdin().read_line(&mut input).expect("Failed to read input");
     let input = input.trim();
 
-    let mut engine = RegexEngine::new(pattern_str);
+    let engine = RegexEngine::new(pattern_str);
     if engine.match_text(input) {
         process::exit(0);
     } else {
