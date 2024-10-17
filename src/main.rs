@@ -179,30 +179,36 @@ impl<'a> MatchContext<'a> {
             RE::Group(group_pattern) => {
                 let original_captures = self.captures.clone();
                 let original_group_index = self.group_index;
-
+    
+                // Increment group index
                 self.group_index += 1;
                 let group_index = self.group_index;
-
-                for len in 0..=self.text.len() {
+    
+                // We reverse the loop to ensure greedy matching: longest match first
+                for len in (0..=self.text.len()).rev() {  // <-- Change here to iterate from longest to shortest
                     let slice = &self.text[..len];
                     let mut local_context = self.clone();
                     local_context.text = slice;
-
+    
+                    // Attempt to match the group
                     if local_context.match_pattern(group_pattern) {
+                        // If the group matched, capture its content
                         local_context.captures.insert(group_index, slice.to_string());
-
+    
+                        // Continue matching the remaining pattern with the rest of the text
                         local_context.text = &self.text[len..];
                         if local_context.match_here(&pattern[1..]) {
-                            *self = local_context;
+                            *self = local_context; // Update self with successful match state
                             return true;
                         }
                     }
                 }
-
+    
+                // Restore captures and group index if no match is found
                 self.captures = original_captures;
                 self.group_index = original_group_index;
                 false
-            }
+            },
             RE::Alternation(left, right) => {
                 let mut local_context = self.clone();
                 if local_context.match_pattern(left) {
